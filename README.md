@@ -8,13 +8,18 @@
 * USB webcam
 
 ## Building and Installation
-1. Open **setup.py** and modify the paths of include and lib files.
+1. Create a symlink for libDynamsoftBarcodeReader.so:
+    
+    ```
+    sudo ln –s /home/pi/dbr-V4.2.0-linux-arm/lib/armv7l/libDynamsoftBarcodeReader.so /usr/lib/libDynamsoftBarcodeReader.so
+    ```
+2. Open **setup.py** and modify the paths of include and lib files.
     
     ```
     include_dirs=["/usr/lib/python2.7/dist-packages/numpy/core/include/numpy", "<Your dbr path>/include"],
     library_dirs=['<Your dbr path>/lib'],
     ```
-2. Build and install Python extension:
+3. Build and install Python extension:
     
     ```
     sudo python setup.py build install
