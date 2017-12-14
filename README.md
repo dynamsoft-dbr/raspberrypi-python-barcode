@@ -1,4 +1,4 @@
-# Building Python Extension with DBR 4.2 for Raspberry Pi
+# Building Python Extension with DBR 5.2 for Raspberry Pi
 
 ## Prerequisites
 * [Dynamsoft Barcode Reader for Raspberry Pi][0]
@@ -7,22 +7,54 @@
 * Raspberry Pi 2 or 3
 * USB webcam
 
+You can also install Dynamsoft Barcode Reader via command line tool:
+
+Add public key:
+```
+wget -O - http://labs.dynamsoft.com/debian/conf/dbr.gpg.key | sudo apt-key add -
+```
+
+Add source to /etc/apt/sources.list:
+```
+deb http://labs.dynamsoft.com/debian/ dbr main non-free
+```
+
+Install Dynamsoft Barcode Reader:
+```
+sudo apt-get update && install dbr
+```
+
 ## Building and Installation
-1. Create a symlink for libDynamsoftBarcodeReader.so:
+1. Create a symlink for **libDynamsoftBarcodeReader.so**:
     
     ```
-    sudo ln –s /home/pi/dbr-V4.2.0-linux-arm/lib/armv7l/libDynamsoftBarcodeReader.so /usr/lib/libDynamsoftBarcodeReader.so
+    sudo ln –s <Your PATH>/libDynamsoftBarcodeReader.so /usr/lib/libDynamsoftBarcodeReader.so
     ```
-2. Open **setup.py** and modify the paths of include and lib files.
-    
+
+    If you install dbr via command line tool, skip this step.
+
+2. Install **Numpy**:
+
     ```
-    include_dirs=["/usr/lib/python2.7/dist-packages/numpy/core/include/numpy", "<Your dbr path>/include"],
-    library_dirs=['<Your dbr path>/lib'],
+    pip install numpy
     ```
+
 3. Build and install Python extension:
     
     ```
+    # Python 2.7
     sudo python setup.py build install
+    # Python 3.x
+    sudo python3 setup.py build install
+    ```
+
+4. Run the test app:
+
+    ```
+    # Python 2.7
+    python test.py
+    # Python 3.x
+    python3 test.py
     ```
 
 ## How to Run

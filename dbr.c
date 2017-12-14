@@ -1,134 +1,209 @@
 #include <Python.h>
-#include "If_DBR.h"
-#include "BarcodeFormat.h"
-#include "BarcodeStructs.h"
-#include "ErrorCode.h"
+#include "DynamsoftBarcodeReader.h"
 #include <ndarraytypes.h>
 
-typedef unsigned long DWORD;
-typedef long LONG;
-typedef unsigned short WORD;
+#if PY_MAJOR_VERSION >= 3
+#ifndef IS_PY3K
+#define IS_PY3K 1
+#endif
+#endif
 
-typedef struct tagBITMAPINFOHEADER {
-  DWORD biSize;
-  LONG biWidth;
-  LONG biHeight;
-  WORD biPlanes;
-  WORD biBitCount;
-  DWORD biCompression;
-  DWORD biSizeImage;
-  LONG biXPelsPerMeter;
-  LONG biYPelsPerMeter;
-  DWORD biClrUsed;
-  DWORD biClrImportant;
-} BITMAPINFOHEADER;
+struct module_state {
+    PyObject *error;
+};
 
-// Barcode format
-const char * GetFormatStr(__int64 format)
+#if defined(IS_PY3K)
+#define GETSTATE(m) ((struct module_state*)PyModule_GetState(m))
+#else
+#define GETSTATE(m) (&_state)
+static struct module_state _state;
+#endif
+
+static PyObject *
+error_out(PyObject *m) {
+    struct module_state *st = GETSTATE(m);
+    PyErr_SetString(st->error, "something bad happened");
+    return NULL;
+}
+
+#define DBR_NO_MEMORY 0
+#define DBR_SUCCESS   1
+
+// #define LOG_OFF
+
+#ifdef LOG_OFF
+
+    #define printf(MESSAGE, __VA_ARGS__)
+
+#endif
+
+// Barcode reader handler
+void* hBarcode = NULL; 
+
+/**
+ * Create DBR instance
+ */
+static int createDBR() 
 {
-    if (format == CODE_39)
-        return "CODE_39";
-    if (format == CODE_128)
-        return "CODE_128";
-    if (format == CODE_93)
-        return "CODE_93";
-    if (format == CODABAR)
-        return "CODABAR";
-    if (format == ITF)
-        return "ITF";
-    if (format == UPC_A)
-        return "UPC_A";
-    if (format == UPC_E)
-        return "UPC_E";
-    if (format == EAN_13)
-        return "EAN_13";
-    if (format == EAN_8)
-        return "EAN_8";
-    if (format == INDUSTRIAL_25)
-        return "INDUSTRIAL_25";
-    if (format == QR_CODE)
-        return "QR_CODE";
-    if (format == PDF417)
-        return "PDF417";
-    if (format == DATAMATRIX)
-        return "DATAMATRIX";
+    if (!hBarcode) {
+        hBarcode = DBR_CreateInstance();
+        if (!hBarcode)
+        {
+            printf("Cannot allocate memory!\n");
+            return DBR_NO_MEMORY;
+        }
+    }
 
-    return "UNKNOWN";
+    return DBR_SUCCESS;
 }
 
 /**
- * Initialize Dynamsoft Barcode Reader license. The method can only be called once. 
- * Invalid license is acceptable.
+ * Destroy DBR instance
+ */
+static void destroyDBR()
+{
+    if (hBarcode) {
+        DBR_DestroyInstance(hBarcode);
+    }
+}
+
+static PyObject *
+create(PyObject *self, PyObject *args)
+{
+    int ret = createDBR();
+    return Py_BuildValue("i", ret);
+}
+
+static PyObject *
+destroy(PyObject *self, PyObject *args)
+{
+    destroyDBR();
+    return Py_BuildValue("i", 0);
+}
+
+/**
+ * Set Dynamsoft Barcode Reader license.  
+ * To get valid license, please contact support@dynamsoft.com
+ * Invalid license is acceptable. With an invalid license, SDK will return an imcomplete result.
  */
 static PyObject *
 initLicense(PyObject *self, PyObject *args)
 {
-    char *license;
-    if (!PyArg_ParseTuple(args, "s", &license)) {
-    return NULL;
-    }
-    // printf("License: %s\n", license);
-    int ret = DBR_InitLicense(license);
-    return Py_BuildValue("i", ret);
-}
-
-/**
- * Decode barcode from a file 
- * 
- */
-static PyObject *
-decodeFile(PyObject *self, PyObject *args)
-{
-    char *pFileName;
-	int iFormat;
-    if (!PyArg_ParseTuple(args, "si", &pFileName, &iFormat)) {
+    if (!createDBR()) 
+    {
         return NULL;
     }
 
-    // Dynamsoft Barcode Reader initialization
-    __int64 llFormat = iFormat;
-    int iMaxCount = 0x7FFFFFFF;
-    ReaderOptions ro = {0};
-    pBarcodeResultArray pResults = NULL;
-    ro.llBarcodeFormat = llFormat;
-    ro.iMaxBarcodesNumPerPage = iMaxCount;
+    char *pszLicense;
+    if (!PyArg_ParseTuple(args, "s", &pszLicense)) {
+        return NULL;
+    }
 
-    // Barcode detection
-    int ret = DBR_DecodeFile(pFileName, &ro, &pResults);
-    // printf("DecodeFile ret: %d\n", ret);
+	int ret = DBR_InitLicenseEx(hBarcode, pszLicense);
+    return Py_BuildValue("i", ret);
+}
 
-    // Get results
+static PyObject *createPyResults(SBarcodeResultArray *pResults)
+{
+    if (!pResults)
+    {
+        printf("No barcode detected\n");
+        return NULL;
+    }
+    // Get barcode results
     int count = pResults->iBarcodeCount;
-    pBarcodeResult* ppBarcodes = pResults->ppBarcodes;
-    pBarcodeResult tmp = NULL;
-    PyObject* list = PyList_New(count); // The returned Python object
+	SBarcodeResult** ppBarcodes = pResults->ppBarcodes;
+	SBarcodeResult* tmp = NULL;
+
+    // Create a Python object to store results
+    PyObject* list = PyList_New(count); 
+    printf("count: %d\n", count);
     PyObject* result = NULL;
     int i = 0;
     for (; i < count; i++)
     {
         tmp = ppBarcodes[i];
+        #if defined(IS_PY3K)
+        result = PyUnicode_FromFormat("%s", tmp->pBarcodeData);
+        #else
         result = PyString_FromString(tmp->pBarcodeData);
-        PyList_SetItem(list, i, Py_BuildValue("iN", (int)tmp->llFormat, result)); // Add results to list
+        #endif
+        PyList_SetItem(list, i, Py_BuildValue("sN", tmp->pBarcodeFormatString, result)); // Add results to list
     }
-    // release memory
+
+    // Release memory
     DBR_FreeBarcodeResults(&pResults);
+
     return list;
 }
 
 /**
- * Decode barcode from an image buffer. The supported data structure is DIB.
- * It is necessary to re-construct input data for barcode detection.
+ * Decode barcode from a file 
+ */
+static PyObject *
+decodeFile(PyObject *self, PyObject *args)
+{
+    if (!createDBR()) 
+    {
+        return NULL;
+    }
+
+    char *pFileName;
+    int iFormat;
+    if (!PyArg_ParseTuple(args, "si", &pFileName, &iFormat)) {
+        return NULL;
+    }
+
+    // Initialize Dynamsoft Barcode Reader
+	int iMaxCount = 0x7FFFFFFF;
+	SBarcodeResultArray *pResults = NULL;
+	DBR_SetBarcodeFormats(hBarcode, iFormat);
+	DBR_SetMaxBarcodesNumPerPage(hBarcode, iMaxCount);
+
+    // Barcode detection
+    int ret = DBR_DecodeFileEx(hBarcode, pFileName, &pResults);
+
+    // Wrap results
+    PyObject *list = createPyResults(pResults);
+    return list;
+}
+
+/**
+ * Decode barcode from an image buffer. 
  */
 static PyObject *
 decodeBuffer(PyObject *self, PyObject *args)
 {
+    if (!createDBR()) 
+    {
+        return NULL;
+    }
+
     PyObject *o;
     int iFormat;
     if (!PyArg_ParseTuple(args, "Oi", &o, &iFormat))
         return NULL;
 
+    #if defined(IS_PY3K)
+    //Refer to numpy/core/src/multiarray/ctors.c
+    Py_buffer *view;
+    int nd;
+    PyObject *memoryview = PyMemoryView_FromObject(o);
+    if (memoryview == NULL) {
+        PyErr_Clear();
+        return -1;
+    }
+
+    view = PyMemoryView_GET_BUFFER(memoryview);
+    char *buffer = (char*)view->buf;
+    nd = view->ndim;
+    int len = view->len;
+    int stride = view->strides[0];
+    int width = view->strides[0] / view->strides[1];
+    int height = len / stride;
+    #else
+
     PyObject *ao = PyObject_GetAttrString(o, "__array_struct__");
-    PyObject *retval;
 
     if ((ao == NULL) || !PyCObject_Check(ao)) {
         PyErr_SetString(PyExc_TypeError, "object does not have array interface");
@@ -136,74 +211,106 @@ decodeBuffer(PyObject *self, PyObject *args)
     }
 
     PyArrayInterface *pai = (PyArrayInterface*)PyCObject_AsVoidPtr(ao);
+    
     if (pai->two != 2) {
         PyErr_SetString(PyExc_TypeError, "object does not have array interface");
         Py_DECREF(ao);
         return NULL;
     }
 
-    // Construct data with header info and image data 
+    // Get image information
     char *buffer = (char*)pai->data; // The address of image data
     int width = pai->shape[1];       // image width
     int height = pai->shape[0];      // image height
     int size = pai->strides[0] * pai->shape[0]; // image size = stride * height
-    char *total = (char *)malloc(size + 40); // buffer size = image size + header size
-    memset(total, 0, size + 40);
-    BITMAPINFOHEADER bitmap_info = {40, width, height, 0, 24, 0, size, 0, 0, 0, 0};
-    memcpy(total, &bitmap_info, 40);
+    #endif
 
-    // Copy image data to buffer from bottom to top
-    char *data = total + 40;
-    int stride = pai->strides[0];
-    int i = 1;
-    for (; i <= height; i++) {
-        memcpy(data, buffer + stride * (height - i), stride);
-        data += stride;
-    }
-
-    // Dynamsoft Barcode Reader initialization
-    __int64 llFormat = iFormat;
+    // Initialize Dynamsoft Barcode Reader
     int iMaxCount = 0x7FFFFFFF;
-    ReaderOptions ro = {0};
-    pBarcodeResultArray pResults = NULL;
-    ro.llBarcodeFormat = llFormat;
-    ro.iMaxBarcodesNumPerPage = iMaxCount;
-    // printf("width: %d, height: %d, size:%d\n", width, height, size);
-    int iRet = DBR_DecodeBuffer((unsigned char *)total, size + 40, &ro, &pResults);
-    // printf("DBR_DecodeBuffer ret: %d\n", iRet);
-    free(total); // Do not forget to release the constructed buffer 
-    
-    // Get results
-    int count = pResults->iBarcodeCount;
-    pBarcodeResult* ppBarcodes = pResults->ppBarcodes;
-    pBarcodeResult tmp = NULL;
-    retval = PyList_New(count); // The returned Python object
-    PyObject* result = NULL;
-    i = 0;
-    for (; i < count; i++)
-    {
-        tmp = ppBarcodes[i];
-        result = PyString_FromString(tmp->pBarcodeData);
-        // printf("result: %s\n", tmp->pBarcodeData);
-        PyList_SetItem(retval, i, Py_BuildValue("iN", (int)tmp->llFormat, result)); // Add results to list
-    }
-    // release memory
-    DBR_FreeBarcodeResults(&pResults);
+	SBarcodeResultArray *pResults = NULL;
+	DBR_SetBarcodeFormats(hBarcode, iFormat);
+	DBR_SetMaxBarcodesNumPerPage(hBarcode, iMaxCount);
 
+    // Detect barcodes
+    int depth = 24;
+    int iStride = ((width * depth + 31) >> 5) << 2;
+
+    PyObject *list = NULL;
+    int iRet = DBR_DecodeBufferEx(hBarcode, buffer, width, height, iStride, IPF_RGB_888, &pResults);
+    // Wrap results
+    list = createPyResults(pResults);
+    
+    #if defined(IS_PY3K)
+    Py_DECREF(memoryview);
+    #else
     Py_DECREF(ao);
-    return retval;
+    #endif
+
+    return list;
 }
 
-static PyMethodDef Methods[] =
+static PyMethodDef dbr_methods[] =
 {
-     {"initLicense", initLicense, METH_VARARGS, NULL},
-     {"decodeFile", decodeFile, METH_VARARGS, NULL},
-     {"decodeBuffer", decodeBuffer, METH_VARARGS, NULL},
-     {NULL, NULL, 0, NULL}
+    {"create", create, METH_VARARGS, NULL},
+    {"destroy", destroy, METH_VARARGS, NULL},
+    {"initLicense", initLicense, METH_VARARGS, NULL},
+    {"decodeFile", decodeFile, METH_VARARGS, NULL},
+    {"decodeBuffer", decodeBuffer, METH_VARARGS, NULL},
+    {NULL, NULL, 0, NULL}
 };
 
+#if defined(IS_PY3K)
+
+static int dbr_traverse(PyObject *m, visitproc visit, void *arg) {
+    Py_VISIT(GETSTATE(m)->error);
+    return 0;
+}
+
+static int dbr_clear(PyObject *m) {
+    Py_CLEAR(GETSTATE(m)->error);
+    return 0;
+}
+
+static struct PyModuleDef moduledef = {
+    PyModuleDef_HEAD_INIT,
+    "dbr",
+    NULL,
+    sizeof(struct module_state),
+    dbr_methods,
+    NULL,
+    dbr_traverse,
+    dbr_clear,
+    NULL
+};
+
+#define INITERROR return NULL
+
 PyMODINIT_FUNC
+PyInit_dbr(void)
+
+#else
+#define INITERROR return
+void
 initdbr(void)
+#endif
 {
-     (void) Py_InitModule("dbr", Methods);
+#if defined(IS_PY3K)
+    PyObject *module = PyModule_Create(&moduledef);
+#else
+    PyObject *module = Py_InitModule("dbr", dbr_methods);
+#endif
+
+    if (module == NULL)
+        INITERROR;
+    struct module_state *st = GETSTATE(module);
+
+    st->error = PyErr_NewException("dbr.Error", NULL, NULL);
+    if (st->error == NULL) {
+        Py_DECREF(module);
+        INITERROR;
+    }
+
+#if defined(IS_PY3K)
+    return module;
+#endif
 }
