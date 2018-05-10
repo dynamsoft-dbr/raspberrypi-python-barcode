@@ -1,5 +1,8 @@
 # Building Python Extension with DBR 5.2 for Raspberry Pi
 
+## License
+Get the [trial license](https://www.dynamsoft.com/CustomerPortal/Portal/Triallicense.aspx).
+
 ## Prerequisites
 * [Dynamsoft Barcode Reader for Raspberry Pi][0]
 * Python 2.7.0
